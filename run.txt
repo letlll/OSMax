@@ -1,0 +1,39 @@
+ProgramName ProgramA
+5	Jump	1021
+10	Jump	2021
+20	Start	10
+30	Jump	2031
+70	Jump	4050
+100	End
+
+ProgramName ProgramB
+3	Jump	2508
+10	Jump	6007
+15	Start	7
+22	Jump	5737
+27	Jump	2245
+31	End
+
+ProgramName ProgramC
+3	Jump	1074
+9	Jump	94
+15	Start	10
+25	Jump	70
+30	Jump	516
+37	End
+
+ProgramName ProgramD
+3	Jump	1037
+10	Jump	782
+15	Start	4
+19	Jump	1168
+28	Jump	79
+34	End
+
+ProgramName ProgramE
+3	Jump	1414
+11	Jump	1074
+16	Start	10
+26	Jump	149
+32	Jump	1273
+39	End
