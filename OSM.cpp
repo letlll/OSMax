@@ -35,8 +35,15 @@ public:
 
     PCB(std::string name, int create, int runtime, int priority, std::string remark)
         : pName(name), createTime(create), runTime(runtime), grade(priority),
-        pRemark(remark), pStatus("Waiting"), startTime(-1), completeTime(0),
+        pRemark(remark), pStatus("null"), startTime(-1), completeTime(0),
         turnoverTime(0), weightedTurnoverTime(0.0), originalRunTime(runtime) {}
+
+    void updateStatus(const std::string& newStatus) {
+        pStatus = newStatus;
+        std::cout << "Process " << pName << " status updated to " << pStatus << std::endl;
+    }
+
+
 };
 
 // PageManager类：处理FIFO和LRU页面替换
@@ -53,53 +60,60 @@ public:
     PageManager(double size, int max) : pageSize(size), maxPages(max) {}
 
     // FIFO替换策略
-    void fifoReplace(int page) {
+    bool fifoReplace(int page) {
         // 检查页面是否在内存中
         std::vector<int> fifoVec = queueToVector(fifoPages);
         if (std::find(fifoVec.begin(), fifoVec.end(), page) != fifoVec.end()) {
             pageHits++;
             log.push_back("FIFO: Page " + std::to_string(page) + " already in memory (hit).");
-            return;
+            return false;  // 页面命中时返回 false，表示没有缺页
         }
+
         pageFaults++;
         if (fifoPages.size() >= maxPages) {
             if (fifoPages.empty()) {
                 std::cerr << "Error: FIFO queue is empty, cannot remove page." << std::endl;
                 log.push_back("FIFO: Error - FIFO queue is empty, cannot remove page.");
-                return;
+                return false; // 发生错误时返回 false
             }
             int removed = fifoPages.front();
             fifoPages.pop();
             log.push_back("FIFO: Page " + std::to_string(removed) + " removed.");
         }
+
         fifoPages.push(page);
         log.push_back("FIFO: Page " + std::to_string(page) + " added.");
+
+        return true;  // 页面替换时返回 true，表示发生了缺页
     }
 
-
-
     // LRU替换策略
-    void lruReplace(int page, int currentTime) {
+    bool lruReplace(int page, int currentTime) {
         if (lruPages.find(page) != lruPages.end()) {
             pageHits++;
-            lruPages[page] = currentTime;
+            lruPages[page] = currentTime;  // 更新最近访问时间
             log.push_back("LRU: Page " + std::to_string(page) + " already in memory (hit).");
-            return;
+            return false;  // 页面命中时返回 false，表示没有缺页
         }
+
         pageFaults++;
         if (lruPages.size() >= maxPages) {
             int lruPage = getLRUPage();
             if (lruPage == -1) {
                 std::cerr << "Error: No LRU page found to remove." << std::endl;
                 log.push_back("LRU: Error - No LRU page found to remove.");
-                return;
+                return false; // 发生错误时返回 false
             }
-            lruPages.erase(lruPage);
+            lruPages.erase(lruPage);  // 删除最久未使用的页面
             log.push_back("LRU: Page " + std::to_string(lruPage) + " removed.");
         }
-        lruPages[page] = currentTime;
+
+        lruPages[page] = currentTime;  // 添加新页面，并更新访问时间
         log.push_back("LRU: Page " + std::to_string(page) + " added.");
+
+        return true;  // 页面替换时返回 true，表示发生了缺页
     }
+
 
 
     void printSummary() {
@@ -148,6 +162,7 @@ void fcfsScheduling();
 void rrScheduling();
 void simulateCPU(std::map<std::string, int>& runTimes);
 void pageScheduling(std::map<std::string, std::map<std::string, double>>& programs);
+void printPhysicalBlockState(PageManager& pageManager);
 
 // 辅助函数：去除字符串首尾的空白字符
 std::string trim(const std::string& str) {
@@ -165,6 +180,7 @@ std::map<std::string, int> loadRunSteps() {
         std::cerr << "Error: Unable to open run.txt" << std::endl;
         return {};
     }
+
     std::map<std::string, int> runTimes;
     std::string line, currentProgram;
     bool isFirstLine = true; // 标记是否为第一行
@@ -187,10 +203,10 @@ std::map<std::string, int> loadRunSteps() {
         line = trim(line);
         if (line.empty()) continue; // Skip empty lines
 
-        // Check if it's a ProgramName line
-        if (line.find("ProgramName") == 0) {
-            // Extract program name
-            size_t pos_space = line.find_first_of(" \t", 11); // "ProgramName" is 11 characters
+        // 检查是否为程序名行（"ProgramName" 或 "程序"）
+        if (line.find("ProgramName") == 0 || line.find("程序") == 0) {
+            // 提取程序名
+            size_t pos_space = line.find_first_of(" \t"); // 查找第一个空格或制表符
             if (pos_space != std::string::npos) {
                 std::string afterKeyword = line.substr(pos_space + 1);
                 afterKeyword = trim(afterKeyword);
@@ -202,36 +218,47 @@ std::map<std::string, int> loadRunSteps() {
             }
         }
         else {
-            // Ensure there is a current program name
+            // 确保存在当前程序名
             if (currentProgram.empty()) {
                 std::cerr << "Warning: Found run step before program name: " << line << std::endl;
                 continue;
             }
 
-            // Parse run step line
-            // Example line: "5	Jump	1021"
+            // 解析运行步骤行（格式："时间 操作 参数" 或 "时间 操作"）
             std::istringstream iss(line);
             int time;
             std::string operation, param;
-            if (!(iss >> time >> operation >> param)) {
+
+            // 如果无法解析到时间和操作，跳过
+            if (!(iss >> time >> operation)) {
                 std::cerr << "Warning: Failed to parse run step line: " << line << std::endl;
                 continue;
             }
 
-            // Update runTimes with the maximum run time for the current program
-            if (runTimes.find(currentProgram) == runTimes.end() || runTimes[currentProgram] < time) {
-                runTimes[currentProgram] = time; // Explicitly cast to int
-                std::cout << "Updated run time [" << currentProgram << "]: " << time << std::endl; // Debug info
+            // 检测是否有第三列参数
+            if (!(iss >> param)) {
+                param = ""; // 如果没有参数，设置为空字符串
             }
+
+            // 如果操作为 "结束" 或 "End"，将时间作为最终运行时间
+            if (operation == "结束" || operation == "End") {
+                runTimes[currentProgram] = std::max(runTimes[currentProgram], time);
+                std::cout << "Set final run time for [" << currentProgram << "] to " << time << " ms" << std::endl;
+                continue;
+            }
+
+            // 更新当前程序的运行时间，取时间的最大值
+            runTimes[currentProgram] = std::max(runTimes[currentProgram], time);
+            std::cout << "Updated run time [" << currentProgram << "]: " << time << std::endl; // Debug info
         }
     }
 
     file.close();
 
-    // Output loaded run times
+    // 输出加载的运行时间
     std::cout << "Loaded Run Times:" << std::endl;
     for (const auto& [program, time] : runTimes) {
-        std::cout << "Program: [" << program << "], Run Time: " << time << "ms" << std::endl; // Debug info
+        std::cout << "Program: [" << program << "], Run Time: " << time << " ms" << std::endl; // Debug info
     }
 
     return runTimes;
@@ -362,172 +389,218 @@ void loadProcesses(std::map<std::string, int>& runTimes) {
     file.close();
 }
 
-// 先来先服务调度（FCFS）
+// FCFS 调度算法（改进：动态记录每个时间片的状态）
 void fcfsScheduling() {
     std::ofstream resultFile("result.txt");
     if (!resultFile.is_open()) {
         std::cerr << "Error: Unable to open result.txt" << std::endl;
         return;
     }
+
     // 按创建时间排序
     std::sort(processList.begin(), processList.end(), [](PCB& a, PCB& b) {
         return a.createTime < b.createTime;
         });
-    int currentTime = 0;
+
+    int currentTime = 0; // 当前时间
+
+    // 输出表头
+    resultFile << "时间片\t运行的进程\t";
+    for (const auto& process : processList) {
+        resultFile << "进程" << process.pName << "状态\t";
+    }
+    resultFile << "\n";
+
+    // 调度过程
     for (auto& process : processList) {
         if (currentTime < process.createTime) {
-            currentTime = process.createTime;
+            currentTime = process.createTime; // 等待进程到达
         }
-        process.startTime = currentTime;
-        process.completeTime = currentTime + process.runTime;
-        process.turnoverTime = process.completeTime - process.createTime;
-        process.weightedTurnoverTime = static_cast<double>(process.turnoverTime) / process.runTime;
+        process.startTime = currentTime; // 记录开始时间
+        process.completeTime = currentTime + process.runTime; // 记录完成时间
+
+        // 每个时间片动态更新状态
+        for (int t = 0; t < process.runTime; ++t) {
+            resultFile << currentTime + t << "\t" << process.pName << "\t"; // 当前时间片和运行的进程
+
+            // 遍历所有进程，更新状态
+            for (auto& p : processList) {
+                if (p.pName == process.pName) {
+                    resultFile << "run\t"; // 当前运行的进程
+                }
+                else if (p.completeTime <= currentTime + t) {
+                    resultFile << "complete\t"; // 已完成的进程
+                }
+                else if (p.createTime > currentTime + t) {
+                    resultFile << "null\t"; // 尚未到达的进程
+                }
+                else {
+                    resultFile << "ready\t"; // 已到达但未运行的进程
+                }
+            }
+            resultFile << "\n";
+        }
+
+        // 更新时间到进程完成时
         currentTime += process.runTime;
 
-        resultFile << "进程名称: " << process.pName << ", 开始时间: " << process.startTime
-            << ", 完成时间: " << process.completeTime << ", 周转时间: " << process.turnoverTime
-            << ", 带权周转时间: " << std::fixed << std::setprecision(2) << process.weightedTurnoverTime << std::endl;
-    }
-    resultFile.close();
-}
-
-// 时间片轮转调度（RR）
-// Assume PCB class and other necessary components are defined as previously
-
-void rrScheduling() {
-    // Open 'result.txt' in truncate mode to clear previous results
-    std::ofstream resultFile("result.txt", std::ios::trunc);
-    if (!resultFile.is_open()) {
-        std::cerr << "Error: Unable to open result.txt" << std::endl;
-        return;
-    }
-    resultFile.close(); // Close immediately; will reopen in append mode later
-
-    // Create a queue to hold pointers to PCB objects waiting for scheduling
-    std::queue<PCB*> processQueue;
-
-    // Sort the processList by creation time (ascending)
-    std::sort(processList.begin(), processList.end(), [](const PCB& a, const PCB& b) {
-        return a.createTime < b.createTime;
-        });
-
-    int currentTime = 0;
-    size_t index = 0; // Index to track the next process to enqueue
-    std::unordered_map<std::string, int> remainingTimeMap; // Map to track remaining time per process
-
-    // Initialize remainingTimeMap with each process's runTime
-    for (auto& process : processList) {
-        remainingTimeMap[process.pName] = process.runTime;
+        // 计算并记录统计信息
+        process.turnoverTime = process.completeTime - process.createTime; // 周转时间
+        process.weightedTurnoverTime = static_cast<double>(process.turnoverTime) / process.runTime; // 带权周转时间
     }
 
-    // Main scheduling loop
-    while (!processQueue.empty() || index < processList.size()) {
-        // Advance currentTime to the next process's createTime if queue is empty
-        if (processQueue.empty() && index < processList.size() && processList[index].createTime > currentTime) {
-            currentTime = processList[index].createTime;
-        }
-
-        // Enqueue all processes that have arrived by currentTime
-        while (index < processList.size() && processList[index].createTime <= currentTime) {
-            PCB* newProcess = &processList[index];
-            processQueue.push(newProcess);
-            std::cout << "Enqueued Process: " << newProcess->pName << " at time " << currentTime << " ms" << std::endl;
-            index++;
-        }
-
-        // If the queue is still empty after enqueuing, increment currentTime and continue
-        if (processQueue.empty()) {
-            currentTime++;
-            continue;
-        }
-
-        // Dequeue the first process in the queue
-        PCB* currentProcess = processQueue.front();
-        processQueue.pop();
-
-        // If the process is running for the first time, set its startTime
-        if (currentProcess->startTime == -1) {
-            currentProcess->startTime = currentTime;
-            std::cout << "Process " << currentProcess->pName << " started at " << currentTime << " ms" << std::endl;
-        }
-
-        // Determine the execution time for this time slice
-        int execTime = std::min(timeSlice, remainingTimeMap[currentProcess->pName]);
-        std::cout << "Executing Process: " << currentProcess->pName
-            << " | Execution Time: " << execTime << " ms" << std::endl;
-
-        // Update times
-        remainingTimeMap[currentProcess->pName] -= execTime;
-        currentTime += execTime;
-
-        // Debug: Current queue status after execution
-        std::cout << "Current Time: " << currentTime << " ms | Remaining Time for "
-            << currentProcess->pName << ": " << remainingTimeMap[currentProcess->pName] << " ms" << std::endl;
-
-        // If the process still has remaining time, re-enqueue it
-        if (remainingTimeMap[currentProcess->pName] > 0) {
-            processQueue.push(currentProcess);
-            std::cout << "Process " << currentProcess->pName << " re-enqueued at " << currentTime << " ms" << std::endl;
-        }
-        else {
-            // Process has completed execution
-            currentProcess->completeTime = currentTime;
-            currentProcess->turnoverTime = currentProcess->completeTime - currentProcess->createTime;
-            currentProcess->weightedTurnoverTime = static_cast<double>(currentProcess->turnoverTime) / currentProcess->originalRunTime;
-
-            // Remove from remainingTimeMap
-            remainingTimeMap.erase(currentProcess->pName);
-
-            std::cout << "Process " << currentProcess->pName << " completed at " << currentTime << " ms"
-                << " | Turnover Time: " << currentProcess->turnoverTime
-                << " ms | Weighted Turnover Time: " << std::fixed << std::setprecision(2)
-                << currentProcess->weightedTurnoverTime << std::endl;
-        }
-
-        // Optional: Print current queue status
-        std::queue<PCB*> tempQueue = processQueue;
-        std::cout << "Current Queue: ";
-        while (!tempQueue.empty()) {
-            PCB* p = tempQueue.front();
-            tempQueue.pop();
-            std::cout << p->pName << " ";
-        }
-        std::cout << std::endl;
-    }
-
-    // Append the scheduling results to 'result.txt'
-    resultFile.open("result.txt", std::ios::app);
-    if (!resultFile.is_open()) {
-        std::cerr << "Error: Unable to open result.txt for appending" << std::endl;
-        return;
-    }
-
+    // 输出每个进程的最终统计信息
+    resultFile << "\n最终统计信息：\n";
     for (const auto& process : processList) {
         resultFile << "进程名称: " << process.pName
             << ", 开始时间: " << process.startTime
             << ", 完成时间: " << process.completeTime
             << ", 周转时间: " << process.turnoverTime
             << ", 带权周转时间: " << std::fixed << std::setprecision(2)
-            << process.weightedTurnoverTime << std::endl;
+            << process.weightedTurnoverTime << "\n";
     }
 
     resultFile.close();
-    std::cout << "RR Scheduling Complete. Results saved to result.txt" << std::endl;
+    std::cout << "FCFS 调度完成，结果已保存到 result.txt" << std::endl;
 }
 
-// 模拟CPU使用情况
-void simulateCPU(std::map<std::string, int>& runTimes) {
+
+
+
+
+// 时间片轮转调度（RR）
+void rrScheduling() {
+    std::ofstream resultFile("result.txt", std::ios::app);
+    if (!resultFile.is_open()) {
+        std::cerr << "错误：无法打开 result.txt 进行结果保存" << std::endl;
+        return;
+    }
+
+    std::queue<PCB*> processQueue;
+    std::sort(processList.begin(), processList.end(), [](const PCB& a, const PCB& b) {
+        return a.createTime < b.createTime;
+        });
+
+    int currentTime = 0;
+    size_t index = 0; // Index for tracking processes to enqueue
+    std::unordered_map<std::string, int> remainingTimeMap;
+
+    // Initialize remaining times
+    for (auto& process : processList) {
+        remainingTimeMap[process.pName] = process.runTime;
+    }
+
+    // 输出表头
+    resultFile << "时间片\t运行的进程\t";
+    for (const auto& process : processList) {
+        resultFile << "进程" << process.pName << "状态\t";
+    }
+    resultFile << "\n";
+
+    // Main scheduling loop
+    while (!processQueue.empty() || index < processList.size()) {
+        // 如果队列为空，跳到下一个进程的创建时间
+        if (processQueue.empty() && index < processList.size() && processList[index].createTime > currentTime) {
+            currentTime = processList[index].createTime;
+        }
+
+        // 将当前时间的进程加入队列
+        while (index < processList.size() && processList[index].createTime <= currentTime) {
+            PCB* newProcess = &processList[index];
+            processQueue.push(newProcess);
+            resultFile << " 进程: " << newProcess->pName << " 在 " << currentTime << " ms 时被加入队列" << std::endl;
+            index++;
+        }
+
+        // 如果队列仍为空，则当前时间加1继续
+        if (processQueue.empty()) {
+            currentTime++;
+            continue;
+        }
+
+        // 从队列中取出一个进程
+        PCB* currentProcess = processQueue.front();
+        processQueue.pop();
+
+        // 如果是第一次运行，设置开始时间
+        if (currentProcess->startTime == -1) {
+            currentProcess->startTime = currentTime;
+        }
+
+        // 执行时间片
+        int execTime = std::min(1, remainingTimeMap[currentProcess->pName]);
+        remainingTimeMap[currentProcess->pName] -= execTime;
+        currentTime += execTime;
+
+        // 输出当前时间片的状态
+        resultFile << currentTime - execTime << "\t" << currentProcess->pName << "\t";
+
+        for (const auto& process : processList) {
+            if (process.pName == currentProcess->pName && remainingTimeMap[process.pName] > 0) {
+                resultFile << "run\t"; // 当前运行的进程
+            }
+            else if (remainingTimeMap[process.pName] == 0) {
+                resultFile << "complete\t"; // 已完成的进程
+            }
+            else if (process.createTime > currentTime - execTime) {
+                resultFile << "null\t"; // 尚未到达的进程
+            }
+            else {
+                resultFile << "ready\t"; // 已到达但未运行的进程
+            }
+        }
+        resultFile << "\n";
+
+        // 如果进程未完成，重新加入队列
+        if (remainingTimeMap[currentProcess->pName] > 0) {
+            processQueue.push(currentProcess);
+        }
+        else {
+            // 完成的进程
+            currentProcess->completeTime = currentTime;
+            currentProcess->turnoverTime = currentProcess->completeTime - currentProcess->createTime;
+            currentProcess->weightedTurnoverTime =
+                static_cast<double>(currentProcess->turnoverTime) / currentProcess->originalRunTime;
+
+            resultFile << "进程 " << currentProcess->pName << " 在 " << currentTime << " ms 完成 "
+                << "| 周转时间： " << currentProcess->turnoverTime
+                << " ms | 带权周转时间： " << std::fixed << std::setprecision(2)
+                << currentProcess->weightedTurnoverTime << std::endl;
+        }
+    }
+
+    // 输出最终统计信息
+    resultFile << "\n最终统计信息：\n";
+    for (const auto& process : processList) {
+        resultFile << "进程名称: " << process.pName
+            << ", 开始时间: " << process.startTime
+            << ", 完成时间: " << process.completeTime
+            << ", 周转时间: " << process.turnoverTime
+            << ", 带权周转时间: " << std::fixed << std::setprecision(2)
+            << process.weightedTurnoverTime << "\n";
+    }
+
+    resultFile.close();
+    std::cout << "RR 调度完成，结果已保存到 result.txt" << std::endl;
+}
+
+
+
+void simulateCPU() {
     std::ifstream file("run.txt");
     if (!file.is_open()) {
         std::cerr << "Error: Unable to open run.txt" << std::endl;
         return;
     }
-    std::cout << "Simulating CPU Usage..." << std::endl;
+    std::cout << "模拟CPU使用情况..." << std::endl;
 
     std::string line, currentProgram;
-    std::map<int, std::string> cpuLog; // 时间点 -> 操作描述
+    std::map<int, std::vector<std::string>> cpuLog;  // 时间点 -> 操作列表
+    std::map<std::string, std::string> processStatus; // 进程名 -> 当前状态
+    std::map<std::string, int> processStartTimes;     // 进程名 -> 启动时间
     bool isFirstLine = true; // 标记是否为第一行
 
+    // 读取所有文件内容并处理
     while (std::getline(file, line)) {
         if (isFirstLine) {
             // 检测并移除BOM
@@ -540,79 +613,111 @@ void simulateCPU(std::map<std::string, int>& runTimes) {
             isFirstLine = false;
         }
 
-        // 打印读取的行及其长度以进行调试
-        std::cout << "Reading line: [" << line << "], Length: " << line.length() << std::endl;
-
         line = trim(line);
-        if (line.empty()) continue; // Skip empty lines
+        if (line.empty()) continue; // 跳过空行
 
-        // Check if it's a ProgramName line
+        // 检查是否是 ProgramName 行
         if (line.find("ProgramName") == 0) {
-            size_t pos_space = line.find_first_of(" \t", 11); // "ProgramName" is 11 characters
+            size_t pos_space = line.find_first_of(" \t", 11); // "ProgramName"是11个字符
             if (pos_space != std::string::npos) {
-                std::string afterKeyword = line.substr(pos_space + 1);
-                afterKeyword = trim(afterKeyword);
-                currentProgram = afterKeyword;
-                std::cout << "Simulating Program: [" << currentProgram << "]" << std::endl; // Debug info
+                currentProgram = trim(line.substr(pos_space + 1));
+                std::cout << "Simulating Program: [" << currentProgram << "]" << std::endl;
+
+                // 初始化进程状态为 "Ready"
+                processStatus[currentProgram] = "Ready";
+                processStartTimes[currentProgram] = 0; // 假设开始时间是0
             }
             else {
                 std::cerr << "Warning: Unable to extract program name: " << line << std::endl;
             }
         }
         else {
-            // Parse run step line
-            // Example line: "5	Jump	1021"
+            // 解析运行步骤行
             std::istringstream iss(line);
             int time;
             std::string operation, param;
-            if (!(iss >> time >> operation >> param)) {
-                std::cerr << "Warning: Failed to parse run step line: " << line << std::endl;
-                continue;
+            if (iss >> time >> operation) {
+                std::string event = currentProgram + " " + operation;
+                if (operation == "End") {
+                    cpuLog[time].push_back(event);  // 记录"End"操作
+                    processStatus[currentProgram] = "Terminated";  // 更新进程状态
+                }
+                else if (iss >> param) {
+                    cpuLog[time].push_back(event + " " + param);
+                }
+                else {
+                    cpuLog[time].push_back(event);
+                }
             }
-
-            cpuLog[time] = currentProgram + " " + operation + " " + param; // Format log
         }
     }
     file.close();
 
-    // Output operations in chronological order
-    for (const auto& [time, logStr] : cpuLog) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Simulate time interval
-        std::cout << "Time: " << time << " ms, Operation: " << logStr << std::endl;
+    // 获取最大时间点
+    int maxTime = cpuLog.rbegin()->first;
+
+    // 每1毫秒递增并显示状态
+    for (int t = 0; t <= maxTime; ++t) {
+        // 输出当前时刻的进程状态
+        std::cout << "时间: " << t << " ms, 当前进程状态:" << std::endl;
+
+        // 输出当前时间点的操作
+        if (cpuLog.find(t) != cpuLog.end()) {
+            for (const auto& operation : cpuLog[t]) {
+                std::cout << "    操作: " << operation << std::endl;
+            }
+        }
+
+        // 更新进程状态
+        for (auto& [process, status] : processStatus) {
+            // 如果进程是运行中，且时间片结束，将状态设置为 ready
+            if (status == "Running") {
+                status = "Ready"; // 运行结束后，设置为就绪
+            }
+            // 如果进程已终止，则不更新
+            else if (status == "Terminated") {
+                continue;
+            }
+
+            // 打印每个进程的当前状态
+            std::cout << "    进程: " << process << ", 状态: " << status << std::endl;
+        }
+
+        // 模拟每1毫秒的递增
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
-    std::cout << "CPU Simulation Complete!" << std::endl;
+    std::cout << "CPU仿真完成!" << std::endl;
 }
 
-// 分页调度
-// 分页调度
+
+
+
+// 模拟分页调度
 void pageScheduling(std::map<std::string, std::map<std::string, double>>& programs) {
     std::map<std::string, int> pageRequirements;
-    // 计算每个程序所需的页面数
+
+    // 计算每个程序的页面需求，不根据实际进程大小动态改变页面数
     for (const auto& [program, functions] : programs) {
         double totalSize = 0.0;
         for (const auto& [func, size] : functions) {
-            totalSize += size;
+            totalSize += size; // 累积程序的总内存需求
         }
-        pageRequirements[program] = static_cast<int>(std::ceil(totalSize / pageSize));
-        std::cout << "计算程序 " << program << " 所需页面数: " << pageRequirements[program] << std::endl; // Debug
-    }
 
-    // 显示每个程序的页面需求
-    std::cout << "程序页面需求:" << std::endl;
-    for (const auto& [program, pages] : pageRequirements) {
-        std::cout << "程序: " << program << " | 所需页面数: " << pages << std::endl;
+        // 根据总内存需求计算所需的页面数
+        pageRequirements[program] = static_cast<int>(std::ceil(totalSize / pageSize));
+        std::cout << "程序 " << program << " 所需页面数: " << pageRequirements[program] << std::endl;
     }
 
     // 获取用户输入的最大页面数
-    std::cout << "请输入每个进程的最大页面数: ";
+    std::cout << "\n请输入每个进程的最大页面数: ";
     int maxPages;
     while (!(std::cin >> maxPages) || maxPages <= 0) {
         std::cout << "输入无效，最大页面数必须为正整数，请重新输入: ";
         std::cin.clear();
         std::cin.ignore(10000, '\n');
     }
-    std::cout << "每个进程的最大页面数设置为: " << maxPages << std::endl; // Debug
+    std::cout << "每个进程的最大页面数设置为: " << maxPages << std::endl;
 
     // 获取用户选择的页面替换算法
     std::cout << "请选择页面替换算法：" << std::endl;
@@ -625,49 +730,87 @@ void pageScheduling(std::map<std::string, std::map<std::string, double>>& progra
         std::cin.clear();
         std::cin.ignore(10000, '\n');
     }
-    std::cout << "选择的页面替换算法为: " << (choice == 1 ? "FIFO" : "LRU") << std::endl; // Debug
+    std::cout << "选择的页面替换算法为: " << (choice == 1 ? "FIFO" : "LRU") << std::endl;
 
     // 创建PageManager实例
     PageManager pageManager(pageSize, maxPages);
     int currentTime = 0;
 
-    // 遍历每个程序及其所需页面数
+    // 输出物理块状态和缺页日志
+    std::cout << "\n--------------------页面调度日志--------------------\n";
+    std::cout << "访问页面 | 物理块状态        | 缺页\n";
+    std::cout << "--------------------------------------------\n";
+
     for (const auto& [program, pages] : pageRequirements) {
         std::cout << "正在处理程序: " << program << " | 需要页面数: " << pages << std::endl;
         for (int page = 0; page < pages; ++page) {
+            bool pageFault = false;
+
+            std::cout << std::setw(9) << page << " | ";
+
+            // 使用选择的页面替换算法
             if (choice == 1) {
-                // 使用FIFO算法
-                pageManager.fifoReplace(page);
-                std::cout << "应用FIFO算法处理页面: " << page << std::endl; // Debug
+                pageFault = pageManager.fifoReplace(page);
             }
             else {
-                // 使用LRU算法
-                pageManager.lruReplace(page, currentTime);
-                std::cout << "应用LRU算法处理页面: " << page << " | 当前时间: " << currentTime << std::endl; // Debug
+                pageFault = pageManager.lruReplace(page, currentTime);
             }
+
+            // 打印物理块状态
+            printPhysicalBlockState(pageManager);
+
+            // 打印缺页状态
+            if (pageFault) {
+                std::cout << "是" << std::endl;
+            }
+            else {
+                std::cout << "否" << std::endl;
+            }
+
             currentTime++;
         }
     }
 
-    // 输出页面置换日志
-    std::cout << "\n页面置换日志:" << std::endl;
-    for (const auto& logEntry : pageManager.log) {
-        std::cout << logEntry << std::endl;
-    }
-
-    // 输出分页调度总结报告
-    std::cout << "\n分页调度总结报告:" << std::endl;
-    std::cout << "页面命中次数: " << pageManager.pageHits << std::endl;
-    std::cout << "页面置换次数 (页面错误): " << pageManager.pageFaults << std::endl;
-    if (pageManager.pageHits + pageManager.pageFaults > 0) {
-        double hitRate = (static_cast<double>(pageManager.pageHits) / (pageManager.pageHits + pageManager.pageFaults)) * 100.0;
-        std::cout << "页面命中率: " << std::fixed << std::setprecision(2) << hitRate << "%" << std::endl;
-    }
-    else {
-        std::cout << "页面命中率: 0.00%" << std::endl;
-    }
+    // 输出页面置换总结报告
+    std::cout << "\n--------------------分页调度总结报告--------------------\n";
+    pageManager.printSummary();
 }
 
+// 打印物理块的状态
+void printPhysicalBlockState(PageManager& pageManager) {
+    std::queue<int> fifoPages = pageManager.fifoPages;
+    std::unordered_map<int, int> lruPages = pageManager.lruPages;
+
+    // 打印FIFO物理块状态
+    std::cout << "[ ";
+    if (!fifoPages.empty()) {
+        std::vector<int> state;
+        while (!fifoPages.empty()) {
+            state.push_back(fifoPages.front());
+            fifoPages.pop();
+        }
+        for (int page : state) {
+            std::cout << page << " ";
+        }
+    }
+    else {
+        std::cout << "- ";
+    }
+
+    std::cout << "] | ";
+
+    // 打印LRU物理块状态
+    if (!lruPages.empty()) {
+        for (const auto& entry : lruPages) {
+            std::cout << entry.first << " ";
+        }
+    }
+    else {
+        std::cout << "- ";
+    }
+
+    std::cout << "| ";
+}
 
 // 主函数
 int main() {
@@ -699,12 +842,10 @@ int main() {
         std::cout << "\n请选择功能：" << std::endl;
         std::cout << "1. 显示进程信息" << std::endl;
         std::cout << "2. 显示程序详细信息" << std::endl;
-        std::cout << "3. 显示程序运行步骤" << std::endl;
-        std::cout << "4. 先来先服务调度（FCFS）" << std::endl;
-        std::cout << "5. 时间片轮转调度（RR）" << std::endl;
-        std::cout << "6. 分页调度" << std::endl;
-        std::cout << "7. 模拟CPU占用情况" << std::endl;
-        std::cout << "8. 退出程序" << std::endl;
+        std::cout << "3. 先来先服务调度（FCFS）" << std::endl;
+        std::cout << "4. 时间片轮转调度（RR）" << std::endl;
+        std::cout << "5. 分页调度" << std::endl;
+        std::cout << "6. 退出程序" << std::endl;
         int choice;
         std::cin >> choice;
 
@@ -735,24 +876,14 @@ int main() {
             }
             break;
         case 3:
-            if (runTimes.empty()) {
-                std::cout << "未加载任何程序运行步骤。" << std::endl;
-            }
-            else {
-                for (const auto& [program, time] : runTimes) {
-                    std::cout << "程序: " << program << ", 运行时间: " << time << "ms" << std::endl;
-                }
-            }
-            break;
-        case 4:
             fcfsScheduling();
             std::cout << "先来先服务调度（FCFS）完成。结果已保存到 result.txt" << std::endl;
             break;
-        case 5:
+        case 4:
             rrScheduling();
             std::cout << "时间片轮转调度（RR）完成。结果已保存到 result.txt" << std::endl;
             break;
-        case 6: {
+        case 5: {
             // 分页调度功能
             std::cout << "请选择操作：" << std::endl;
             std::cout << "1. 设置页面大小和时间片长度" << std::endl;
@@ -791,10 +922,8 @@ int main() {
             break;
         }
 
-        case 7:
-            simulateCPU(runTimes);
-            break;
-        case 8:
+
+        case 6:
             std::cout << "正在退出程序..." << std::endl;
             return 0;
         default:
