@@ -248,19 +248,14 @@
 进程名称: DProgram, 开始时间: 168, 完成时间: 202, 周转时间: 196, 带权周转时间: 5.76
 进程名称: EProgram, 开始时间: 202, 完成时间: 241, 周转时间: 233, 带权周转时间: 5.97
 时间片	运行的进程	进程AProgram状态	进程BProgram状态	进程CProgram状态	进程DProgram状态	进程EProgram状态	
- 进程: AProgram 在 0 ms 时被加入队列
 0	AProgram	run	null	null	null	null	
- 进程: BProgram 在 1 ms 时被加入队列
 1	AProgram	run	ready	null	null	null	
 2	BProgram	ready	run	null	null	null	
- 进程: CProgram 在 3 ms 时被加入队列
 3	AProgram	run	ready	ready	null	null	
 4	BProgram	ready	run	ready	null	null	
 5	CProgram	ready	ready	run	null	null	
- 进程: DProgram 在 6 ms 时被加入队列
 6	AProgram	run	ready	ready	ready	null	
 7	BProgram	ready	run	ready	ready	null	
- 进程: EProgram 在 8 ms 时被加入队列
 8	CProgram	ready	ready	run	ready	ready	
 9	DProgram	ready	ready	ready	run	ready	
 10	AProgram	run	ready	ready	ready	ready	
