@@ -129,13 +129,16 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="OSM.cpp" />
+    <ClCompile Include="OSPN.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="process.txt" />
     <Text Include="program.txt" />
     <Text Include="result.txt" />
     <Text Include="run.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="README.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

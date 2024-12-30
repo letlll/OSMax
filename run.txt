@@ -1,39 +1,39 @@
 ProgramName ProgramA
 5	Jump	1021
 10	Jump	2021
-20	Start	10
+20	MovingArmDisk	10
 30	Jump	2031
 70	Jump	4050
-100	End
+100	End		
 
 ProgramName ProgramB
 3	Jump	2508
 10	Jump	6007
-15	Start	7
+15	MovingArmDisk	7
 22	Jump	5737
 27	Jump	2245
-31	End
+31	End		6311
 
 ProgramName ProgramC
 3	Jump	1074
 9	Jump	94
-15	Start	10
+15	MovingArmDisk	10
 25	Jump	70
 30	Jump	516
-37	End
+37	End		50
 
 ProgramName ProgramD
 3	Jump	1037
 10	Jump	782
-15	Start	4
+15	MovingArmDisk	4
 19	Jump	1168
 28	Jump	79
-34	End
+34	End		431
 
 ProgramName ProgramE
 3	Jump	1414
 11	Jump	1074
-16	Start	10
+16	MovingArmDisk	10
 26	Jump	149
 32	Jump	1273
-39	End
+39	End		2053
